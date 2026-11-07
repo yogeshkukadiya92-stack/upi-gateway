@@ -65,3 +65,8 @@ document.addEventListener('input', (event) => {
         preview.textContent = `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 });
+
+// Browser print dialog supports local PDF saving without a paid service.
+document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-print-page]')) window.print();
+});

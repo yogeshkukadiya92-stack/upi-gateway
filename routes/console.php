@@ -1,7 +1,9 @@
 <?php
 
+use App\Models\BillingSubscription;
 use App\Models\Order;
 use App\Models\User;
+use App\Services\Billing\BillingService;
 use App\Services\OrderService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -48,3 +50,16 @@ Artisan::command('app:create-admin {email} {--name=Admin}', function (string $em
 })->purpose('Create or promote an admin user');
 
 Schedule::command('orders:check-pending')->everyMinute()->withoutOverlapping();
+
+Artisan::command('billing:renew', function (BillingService $billing) {
+    $count = 0;
+    BillingSubscription::where('status', 'active')
+        ->whereDate('next_billing_on', '<=', today('Asia/Kolkata'))
+        ->chunkById(100, function ($rows) use ($billing, &$count) {
+            foreach ($rows as $subscription) {
+                $count += $billing->generate($subscription);
+            }
+        });
+    $this->info("Generated {$count} renewal invoices. No payments charged or messages sent.");
+})->purpose('Generate fee-free renewal invoices without charging customers');
+Schedule::command('billing:renew')->hourly()->withoutOverlapping();

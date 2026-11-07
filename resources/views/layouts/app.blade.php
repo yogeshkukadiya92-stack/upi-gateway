@@ -10,6 +10,14 @@
             ['orders.index', 'Orders', 'receipt', 'orders.*'],
             ['accounts.index', 'UPI Accounts', 'qr', 'accounts.*'],
         ],
+        'Billing' => [
+            ['billing.index', 'Billing overview', 'chart', 'billing.index'],
+            ['billing.customers', 'Customers', 'users', 'billing.customers*'],
+            ['billing.plans', 'Plans', 'receipt', 'billing.plans*'],
+            ['billing.subscriptions', 'Subscriptions', 'clock', 'billing.subscription*'],
+            ['billing.invoices', 'Invoices', 'receipt', 'billing.invoice*'],
+            ['billing.reminders', 'Reminders', 'clock', 'billing.reminders'],
+        ],
         'Developers' => [
             ['settings', 'API & Webhooks', 'key', 'settings*'],
             ['docs', 'API Docs', 'book', 'docs'],

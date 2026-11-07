@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Admin\TransactionDebuggerController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ChangePasswordController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\ConfirmPasswordController;
@@ -105,4 +106,32 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/transaction-debugger', [TransactionDebuggerController::class, 'index'])->name('transactions.index');
         Route::get('/transaction-debugger/{order}', [TransactionDebuggerController::class, 'show'])->name('transactions.show');
     });
+});
+
+// Fee-free billing: no automatic debit or payment-provider calls.
+Route::get('/invoice/{token}', [BillingController::class, 'publicInvoice'])->where('token', '[A-Za-z0-9]{48}')->name('billing.public');
+Route::post('/invoice/{token}/pay', [BillingController::class, 'pay'])->where('token', '[A-Za-z0-9]{48}')->middleware('throttle:15,1')->name('billing.pay');
+Route::prefix('billing')->name('billing.')->middleware(['auth', 'active'])->controller(BillingController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::get('/customers', 'customers')->name('customers');
+    Route::post('/customers', 'storeCustomer')->name('customers.store');
+    Route::get('/customers/{customer}/edit', 'editCustomer')->name('customers.edit');
+    Route::put('/customers/{customer}', 'updateCustomer')->name('customers.update');
+    Route::post('/customers/{customer}/toggle', 'toggleCustomer')->name('customers.toggle');
+    Route::get('/plans', 'plans')->name('plans');
+    Route::post('/plans', 'storePlan')->name('plans.store');
+    Route::post('/plans/{plan}/toggle', 'togglePlan')->name('plans.toggle');
+    Route::get('/subscriptions', 'subscriptions')->name('subscriptions');
+    Route::post('/subscriptions', 'storeSubscription')->name('subscriptions.store');
+    Route::post('/renewals', 'generate')->middleware('throttle:5,1')->name('generate');
+    Route::get('/subscriptions/{subscription}', 'subscription')->name('subscription');
+    Route::post('/subscriptions/{subscription}', 'changeSubscription')->name('subscription.change');
+    Route::get('/invoices', 'invoiceList')->name('invoices');
+    Route::post('/invoices', 'storeInvoice')->name('invoices.store');
+    Route::get('/invoices/{invoice}', 'invoice')->name('invoice');
+    Route::post('/invoices/{invoice}/void', 'voidInvoice')->name('invoice.void');
+    Route::post('/invoices/{invoice}/refund', 'refund')->name('invoice.refund');
+    Route::post('/invoices/{invoice}/reminder', 'markReminder')->name('invoice.reminder');
+    Route::get('/reminders', 'reminders')->name('reminders');
+    Route::get('/export', 'export')->name('export');
 });
