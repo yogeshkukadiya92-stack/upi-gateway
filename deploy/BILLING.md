@@ -23,3 +23,14 @@ For rollback, return to the previous image/commit and leave billing tables in pl
 ## Checks
 
 `php artisan test` covers tenant isolation, public-data minimisation, recurrence, duplicate generation, exact money, payment reuse and verification, refunds, CSV formula escaping and existing payment flows. `npm run build` builds the assets. Payment-provider fees are not introduced; normal hosting/bank/account terms still apply.
+
+## Commerce additions
+
+- Catalogue: `/billing/products`, editable products/services and archive/restore. Price changes affect new invoices only.
+- Payment pages/buttons: `/billing/pages`, select catalogue entries, publish/unpublish and copy a plain HTML link button. Public pages use `/p/{slug}`. Customers choose one item and quantity per invoice; this is not a multi-item cart or inventory system.
+- Coupons: `/billing/coupons`, fixed INR or percentage, minimum order, maximum discount, inclusive start/end dates and total-use limits. An issued, non-void invoice reserves a use, including unpaid invoices. No stacking, no recurring coupon discount. Disable an old coupon and create a new code to change its terms.
+- Partial payments: invoice amounts are settled by the sum of verified associated orders. One pending/review/expired order is reused until resolved; its amount does not change. Old form retries return the existing payment. Minimum payment and remaining nonzero balance are ₹1. Refund records do not reopen the invoice balance.
+- Trial days: 0–365 days per subscription, with no invoice/debit during the trial. Billing dates anchor to trial end.
+- Plan changes: snapshot the selected active plan for the next generated invoice, reset the schedule anchor at that invoice, and remove the old recurring discount. No proration. Existing invoices stay unchanged. Pending changes can be removed. Paused subscriptions apply the change on the next generated invoice after resuming.
+
+Migration `2026_11_08_000001` backfills old invoice/order links before enabling partial collections. Do not revert to the pre-commerce application after accepting partial payments: old code assumes a single order settles the whole invoice. Roll back only before new commerce transactions, or deploy a forward fix. Never drop the new financial tables on production.

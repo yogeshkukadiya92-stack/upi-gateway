@@ -13,6 +13,9 @@
         'Billing' => [
             ['billing.index', 'Billing overview', 'chart', 'billing.index'],
             ['billing.customers', 'Customers', 'users', 'billing.customers*'],
+            ['commerce.products', 'Catalogue', 'receipt', 'commerce.products*'],
+            ['commerce.pages', 'Payment pages & buttons', 'receipt', 'commerce.pages*'],
+            ['commerce.coupons', 'Coupons', 'receipt', 'commerce.coupons*'],
             ['billing.plans', 'Plans', 'receipt', 'billing.plans*'],
             ['billing.subscriptions', 'Subscriptions', 'clock', 'billing.subscription*'],
             ['billing.invoices', 'Invoices', 'receipt', 'billing.invoice*'],

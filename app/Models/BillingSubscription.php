@@ -10,7 +10,7 @@ class BillingSubscription extends Model
 
     protected function casts(): array
     {
-        return ['starts_on' => 'immutable_date', 'next_billing_on' => 'immutable_date', 'cancelled_at' => 'datetime'];
+        return ['starts_on' => 'immutable_date', 'billing_anchor_on' => 'immutable_date', 'pending_plan' => 'array', 'next_billing_on' => 'immutable_date', 'cancelled_at' => 'datetime'];
     }
 
     public function user()
@@ -35,6 +35,6 @@ class BillingSubscription extends Model
 
     public function cycleDate(int $cycle)
     {
-        return $this->starts_on->addMonthsNoOverflow($cycle * $this->interval_months);
+        return ($this->billing_anchor_on ?? $this->starts_on)->addMonthsNoOverflow(($cycle - $this->anchor_cycle) * $this->interval_months);
     }
 }

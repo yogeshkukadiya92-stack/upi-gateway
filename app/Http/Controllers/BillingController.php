@@ -9,6 +9,7 @@ use App\Models\BillingRefund;
 use App\Models\BillingSubscription;
 use App\Models\Order;
 use App\Services\Billing\BillingService;
+use App\Services\Billing\CouponService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -30,15 +31,15 @@ class BillingController extends Controller
 
     public function index(Request $r)
     {
-        $paid = $this->invoices($r)->whereHas('order', fn ($q) => $q->where('status', Order::PAID));
+        $paidSql = BillingInvoice::paidSql();
 
         return view('billing.index', [
             'customers' => BillingCustomer::where('user_id', $r->user()->id)->where('is_active', true)->count(),
             'active' => BillingSubscription::where('user_id', $r->user()->id)->where('status', 'active')->count(),
-            'outstanding' => (int) $this->invoices($r)->outstanding()->sum(DB::raw('amount_paise - discount_paise')),
-            'collected' => (int) $paid->sum(DB::raw('amount_paise - discount_paise')),
+            'outstanding' => (int) $this->invoices($r)->outstanding()->sum(DB::raw('amount_paise - discount_paise - '.$paidSql)),
+            'collected' => (int) $this->invoices($r)->sum(DB::raw($paidSql)),
             'refunds' => (int) BillingRefund::where('user_id', $r->user()->id)->sum('amount_paise'),
-            'invoices' => $this->invoices($r)->with('order')->latest()->limit(8)->get(),
+            'invoices' => $this->invoices($r)->with('orders', 'order')->latest()->limit(8)->get(),
             'hasUpi' => $r->user()->paymentAccounts()->where('provider', 'manual')->where('is_active', true)->exists(),
         ]);
     }
@@ -135,7 +136,7 @@ class BillingController extends Controller
         $d = $r->validate(['customer_id' => 'required|integer', 'plan_id' => 'required|integer',
             'starts_on' => 'required|date_format:Y-m-d|after_or_equal:today|before:2100-01-01',
             'discount' => ['nullable', 'numeric', 'min:0', 'max:99999', 'regex:/^\d+(\.\d{1,2})?$/'],
-            'total_cycles' => 'nullable|integer|min:1|max:1200']);
+            'trial_days' => 'nullable|integer|min:0|max:365', 'total_cycles' => 'nullable|integer|min:1|max:1200']);
         $c = BillingCustomer::where('user_id', $r->user()->id)->findOrFail($d['customer_id']);
         $p = BillingPlan::where('user_id', $r->user()->id)->findOrFail($d['plan_id']);
         $s = $this->billing->subscribe($r->user(), $c, $p, $d);
@@ -148,7 +149,8 @@ class BillingController extends Controller
         $this->own($r, $subscription);
 
         return view('billing.subscription', ['subscription' => $subscription->load('customer'),
-            'invoices' => $subscription->invoices()->with('order')->latest()->paginate(20)]);
+            'plans' => BillingPlan::where('user_id', $r->user()->id)->where('is_active', true)->orderBy('name')->get(),
+            'invoices' => $subscription->invoices()->with('orders', 'order')->latest()->paginate(20)]);
     }
 
     public function changeSubscription(Request $r, BillingSubscription $subscription)
@@ -158,6 +160,28 @@ class BillingController extends Controller
         $this->billing->changeState($subscription, $d['action']);
 
         return back()->with('status', 'Subscription updated. Already issued invoices are unchanged.');
+    }
+
+    public function changePlan(Request $r, BillingSubscription $subscription)
+    {
+        $this->own($r, $subscription);
+        $d = $r->validate(['plan_id' => 'required|integer']);
+        $plan = BillingPlan::where('user_id', $r->user()->id)->findOrFail($d['plan_id']);
+        $this->billing->schedulePlan($subscription, $plan);
+
+        return back()->with('status', 'Plan change scheduled for the next invoice. No proration; old discounts end when the new plan starts.');
+    }
+
+    public function cancelPlanChange(Request $r, BillingSubscription $subscription)
+    {
+        $this->own($r, $subscription);
+        DB::transaction(function () use ($subscription) {
+            $s = BillingSubscription::whereKey($subscription->id)->lockForUpdate()->firstOrFail();
+            $s->pending_plan = null;
+            $s->save();
+        });
+
+        return back()->with('status', 'Pending plan change removed.');
     }
 
     public function generate(Request $r)
@@ -175,10 +199,10 @@ class BillingController extends Controller
 
     public function invoiceList(Request $r)
     {
-        $query = $this->invoices($r)->with('order');
+        $query = $this->invoices($r)->with('orders', 'order');
         $filter = $r->query('status');
         if ($filter === 'paid') {
-            $query->whereHas('order', fn ($q) => $q->where('status', Order::PAID));
+            $query->paid();
         } elseif ($filter === 'outstanding') {
             $query->outstanding();
         } elseif ($filter === 'overdue') {
@@ -196,6 +220,7 @@ class BillingController extends Controller
         $d = $r->validate(['customer_id' => 'required|integer', 'description' => 'required|string|max:255',
             'amount' => ['required', 'numeric', 'min:1', 'max:100000', 'regex:/^\d+(\.\d{1,2})?$/'],
             'discount' => ['nullable', 'numeric', 'min:0', 'max:99999', 'regex:/^\d+(\.\d{1,2})?$/'],
+            'coupon' => 'nullable|string|max:40',
             'due_on' => 'required|date_format:Y-m-d|after_or_equal:today|before:2100-01-01']);
         $c = BillingCustomer::where('user_id', $r->user()->id)->where('is_active', true)->findOrFail($d['customer_id']);
         $amount = BillingService::paise((string) $d['amount']);
@@ -203,8 +228,16 @@ class BillingController extends Controller
         if ($amount - $discount < 100) {
             throw ValidationException::withMessages(['discount' => 'Amount after discount must be at least ₹1.']);
         }
-        $i = new BillingInvoice;
-        $i->forceFill($this->billing->invoiceFields($r->user(), $c, $d['description'], $amount, $discount, today('Asia/Kolkata')->toDateString(), $d['due_on']))->save();
+        $i = DB::transaction(function () use ($r, $c, $d, $amount, $discount) {
+            [$coupon,$couponDiscount] = app(CouponService::class)->reserve($r->user()->id, $d['coupon'] ?? null, $amount);
+            if ($coupon && $discount > 0) {
+                throw ValidationException::withMessages(['coupon' => 'Use either a coupon or a manual discount, not both.']);
+            }
+            $i = new BillingInvoice;
+            $i->forceFill($this->billing->invoiceFields($r->user(), $c, $d['description'], $amount, $coupon ? $couponDiscount : $discount, today('Asia/Kolkata')->toDateString(), $d['due_on']) + ['coupon_id' => $coupon?->id, 'coupon_code' => $coupon?->code])->save();
+
+            return $i;
+        });
 
         return redirect()->route('billing.invoice', $i)->with('status', 'Invoice created. Share the link when ready.');
     }
@@ -234,7 +267,7 @@ class BillingController extends Controller
     public function reminders(Request $r)
     {
         return view('billing.reminders', ['invoices' => $this->invoices($r)->outstanding()
-            ->whereDate('due_on', '<=', today('Asia/Kolkata')->addDays(3))->with('customer', 'order')
+            ->whereDate('due_on', '<=', today('Asia/Kolkata')->addDays(3))->with('customer', 'orders', 'order')
             ->orderBy('due_on')->paginate(20)]);
     }
 
@@ -259,14 +292,14 @@ class BillingController extends Controller
             'refunded_on' => 'required|date_format:Y-m-d|before_or_equal:today', 'confirmed' => 'accepted']);
         DB::transaction(function () use ($r, $invoice, $d) {
             $i = BillingInvoice::whereKey($invoice->id)->lockForUpdate()->firstOrFail();
-            if ($i->state() !== 'paid') {
-                throw ValidationException::withMessages(['refund' => 'Only a verified paid invoice can have a refund record.']);
+            if ($i->paidPaise() === 0) {
+                throw ValidationException::withMessages(['refund' => 'Only verified payments can have a refund record.']);
             }
-            if ($d['refunded_on'] < $i->order->paid_at->toDateString()) {
+            if ($d['refunded_on'] < $i->orders->where('status', Order::PAID)->max('paid_at')->toDateString()) {
                 throw ValidationException::withMessages(['refunded_on' => 'Refund date cannot be earlier than the payment.']);
             }
             $amount = BillingService::paise((string) $d['amount']);
-            if ($amount > $i->totalPaise() - (int) $i->refunds()->sum('amount_paise')) {
+            if ($amount > $i->paidPaise() - (int) $i->refunds()->sum('amount_paise')) {
                 throw ValidationException::withMessages(['amount' => 'Refund exceeds the remaining paid amount.']);
             }
             if (BillingRefund::where('user_id', $r->user()->id)->where('reference', $d['reference'])->exists()) {
@@ -283,15 +316,16 @@ class BillingController extends Controller
 
     public function publicInvoice(string $token)
     {
-        $invoice = BillingInvoice::where('public_token', $token)->whereHas('user', fn ($q) => $q->where('is_active', true))->with('order')->firstOrFail();
+        $invoice = BillingInvoice::where('public_token', $token)->whereHas('user', fn ($q) => $q->where('is_active', true))->with('orders', 'order')->firstOrFail();
 
         return response()->view('billing.public', compact('invoice'))->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, nofollow')->header('Referrer-Policy', 'no-referrer');
     }
 
-    public function pay(string $token)
+    public function pay(Request $r, string $token)
     {
         $i = BillingInvoice::where('public_token', $token)->firstOrFail();
-        $order = $this->billing->payment($i);
+        $d = $r->validate(['expected_order_id' => 'nullable|integer|min:0', 'amount' => ['nullable', 'numeric', 'min:1', 'max:100000', 'regex:/^\d+(\.\d{1,2})?$/']]);
+        $order = $this->billing->payment($i, isset($d['amount']) ? BillingService::paise((string) $d['amount']) : null, isset($d['expected_order_id']) ? (int) $d['expected_order_id'] : null);
 
         return redirect($order->paymentUrl());
     }
@@ -299,7 +333,7 @@ class BillingController extends Controller
     public function export(Request $r)
     {
         $d = $r->validate(['from' => 'nullable|date_format:Y-m-d', 'to' => 'nullable|date_format:Y-m-d|after_or_equal:from']);
-        $query = $this->invoices($r)->with('order', 'customer')->withSum('refunds', 'amount_paise')->orderBy('id');
+        $query = $this->invoices($r)->with('orders', 'order', 'customer')->withSum('refunds', 'amount_paise')->orderBy('id');
         if (! empty($d['from'])) {
             $query->whereDate('issued_on', '>=', $d['from']);
         }
@@ -309,12 +343,12 @@ class BillingController extends Controller
 
         return response()->streamDownload(function () use ($query) {
             $f = fopen('php://output', 'w');
-            fputcsv($f, ['Invoice', 'Customer', 'Email', 'Description', 'Issued', 'Due', 'Amount INR', 'Discount INR', 'Total INR', 'Status', 'Paid at', 'UTR', 'Refunded INR'], ',', '"', '');
+            fputcsv($f, ['Invoice', 'Customer', 'Email', 'Description', 'Issued', 'Due', 'Amount INR', 'Discount INR', 'Total INR', 'Status', 'Paid at', 'UTR', 'Refunded INR', 'Verified paid INR', 'Remaining INR'], ',', '"', '');
             foreach ($query->lazyById(200) as $i) {
                 $row = [$i->number, $i->customer_name, $i->customer->email, $i->description,
                     $i->issued_on->toDateString(), $i->due_on->toDateString(), number_format($i->amount_paise / 100, 2, '.', ''),
                     number_format($i->discount_paise / 100, 2, '.', ''), number_format($i->totalPaise() / 100, 2, '.', ''),
-                    $i->state(), $i->order?->paid_at?->toIso8601String(), $i->order?->utr, number_format(($i->refunds_sum_amount_paise ?? 0) / 100, 2, '.', '')];
+                    $i->state(), $i->order?->paid_at?->toIso8601String(), $i->orders->where('status', Order::PAID)->pluck('utr')->filter()->join('; '), number_format(($i->refunds_sum_amount_paise ?? 0) / 100, 2, '.', ''), number_format($i->paidPaise() / 100, 2, '.', ''), number_format($i->remainingPaise() / 100, 2, '.', '')];
                 $row = array_map(fn ($v) => preg_match('/^[\s]*[=+@-]|^[\t\r\n]/', (string) $v) ? "'".$v : (string) $v, $row);
                 fputcsv($f, $row, ',', '"', '');
             }

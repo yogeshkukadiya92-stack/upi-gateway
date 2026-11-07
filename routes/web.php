@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ChangePasswordController;
 use App\Http\Controllers\CheckoutController;
+use App\Http\Controllers\CommerceController;
 use App\Http\Controllers\ConfirmPasswordController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InstallController;
@@ -134,4 +135,25 @@ Route::prefix('billing')->name('billing.')->middleware(['auth', 'active'])->cont
     Route::post('/invoices/{invoice}/reminder', 'markReminder')->name('invoice.reminder');
     Route::get('/reminders', 'reminders')->name('reminders');
     Route::get('/export', 'export')->name('export');
+});
+
+Route::get('/p/{slug}', [CommerceController::class, 'show'])->name('commerce.public');
+Route::post('/p/{slug}', [CommerceController::class, 'checkout'])->middleware('throttle:10,1')->name('commerce.checkout');
+Route::post('/p/{slug}/new', [CommerceController::class, 'newPurchase'])->middleware('throttle:10,1')->name('commerce.new');
+Route::prefix('billing')->name('commerce.')->middleware(['auth', 'active'])->controller(CommerceController::class)->group(function () {
+    Route::get('/products', 'products')->name('products');
+    Route::post('/products', 'storeProduct')->name('products.store');
+    Route::put('/products/{product}', 'updateProduct')->name('products.update');
+    Route::post('/products/{product}/toggle', 'toggleProduct')->name('products.toggle');
+    Route::get('/pages', 'pages')->name('pages');
+    Route::post('/pages', 'storePage')->name('pages.store');
+    Route::put('/pages/{page}', 'updatePage')->name('pages.update');
+    Route::post('/pages/{page}/toggle', 'togglePage')->name('pages.toggle');
+    Route::get('/coupons', 'coupons')->name('coupons');
+    Route::post('/coupons', 'storeCoupon')->name('coupons.store');
+    Route::post('/coupons/{coupon}/toggle', 'toggleCoupon')->name('coupons.toggle');
+});
+Route::middleware(['auth', 'active'])->group(function () {
+    Route::post('/billing/subscriptions/{subscription}/plan', [BillingController::class, 'changePlan'])->name('billing.subscription.plan');
+    Route::delete('/billing/subscriptions/{subscription}/plan', [BillingController::class, 'cancelPlanChange'])->name('billing.subscription.plan.cancel');
 });

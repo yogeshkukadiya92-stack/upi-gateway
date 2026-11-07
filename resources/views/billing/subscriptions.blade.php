@@ -13,7 +13,8 @@
 @else<form method="POST" action="{{ route('billing.subscriptions.store') }}">@csrf
 <label class="label" for="customer">Customer</label><select id="customer" name="customer_id" class="input mb-5" required><option value="">Choose customer</option>@foreach($customers as $c)<option value="{{ $c->id }}" @selected(old('customer_id')==$c->id)>{{ $c->name }}</option>@endforeach</select>
 <label class="label" for="plan">Plan</label><select id="plan" name="plan_id" class="input mb-5" required><option value="">Choose plan</option>@foreach($plans as $p)<option value="{{ $p->id }}" @selected(old('plan_id')==$p->id)>{{ $p->name }} · ₹{{ number_format($p->amount_paise/100,2) }} · {{ $p->intervalLabel() }}</option>@endforeach</select>
-<x-input name="starts_on" label="First invoice date" type="date" :value="today('Asia/Kolkata')->toDateString()" :min="today('Asia/Kolkata')->toDateString()" required/>
+<x-input name="starts_on" label="Subscription start date" type="date" :value="today('Asia/Kolkata')->toDateString()" :min="today('Asia/Kolkata')->toDateString()" required/>
+<x-input name="trial_days" label="Free trial (days)" type="number" min="0" max="365" value="0" help="First invoice is issued after the trial ends. No automatic debit."/>
 <x-input name="discount" label="Discount per invoice (INR)" type="number" step="0.01" min="0" value="0"/>
 <x-input name="total_cycles" label="Number of cycles (optional)" type="number" min="1" max="1200" help="Leave blank to continue until cancelled. Paused cycles are skipped."/>
 <p class="text-xs text-slate-500 mb-4">Confirm the plan and billing terms with your customer before sharing invoices. This does not create an AutoPay mandate.</p><button class="btn btn-primary">Create subscription</button></form>@endif</div></div>

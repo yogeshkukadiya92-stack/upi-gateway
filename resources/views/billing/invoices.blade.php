@@ -9,7 +9,7 @@
 @if($customers->isEmpty())<p class="mt-5">Add a customer first.</p><a href="{{ route('billing.customers') }}" class="btn btn-primary mt-3">Add customer</a>
 @else<form method="POST" action="{{ route('billing.invoices.store') }}" class="mt-5 max-w-2xl">@csrf
 <label class="label" for="customer">Customer</label><select id="customer" name="customer_id" class="input mb-5" required><option value="">Choose customer</option>@foreach($customers as $c)<option value="{{ $c->id }}" @selected(old('customer_id')==$c->id)>{{ $c->name }}</option>@endforeach</select>
-<x-input name="description" label="Description" maxlength="255" required/><div class="grid sm:grid-cols-2 gap-4"><x-input name="amount" label="Amount (INR)" type="number" min="1" max="100000" step="0.01" required/><x-input name="discount" label="Discount (INR)" type="number" min="0" step="0.01" value="0"/></div>
+<x-input name="description" label="Description" maxlength="255" required/><div class="grid sm:grid-cols-2 gap-4"><x-input name="amount" label="Amount (INR)" type="number" min="1" max="100000" step="0.01" required/><x-input name="coupon" label="Coupon code (optional)" maxlength="40" help="Use a coupon or a manual discount, not both."/><x-input name="discount" label="Discount (INR)" type="number" min="0" step="0.01" value="0"/></div>
 <x-input name="due_on" label="Payment due date" type="date" :value="today('Asia/Kolkata')->addDays(7)->toDateString()" :min="today('Asia/Kolkata')->toDateString()" required/>
 <button class="btn btn-primary">Create invoice</button></form>@endif</details>
 @endsection
