@@ -100,6 +100,21 @@ class CommerceFeaturesTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_legacy_order_written_during_rolling_update_stays_paid(): void
+    {
+        [$u,$c,$p] = $this->fixture();
+        $i = $this->invoice($u, $c, $p);
+        $o = app(BillingService::class)->payment($i);
+        $this->paid($o, '333333333333');
+        $i->orders()->detach(); // Old version wrote order_id after the migration backfill.
+        $this->assertSame('paid', $i->fresh()->state());
+        $this->assertSame(1, BillingInvoice::paid()->count());
+        $this->assertSame(0, BillingInvoice::outstanding()->count());
+        $this->assertSame($o->id, app(BillingService::class)->payment($i)->id);
+        $this->assertSame(1, $i->orders()->count());
+        $this->assertSame(100000, $i->fresh()->paidPaise());
+    }
+
     public function test_excess_fractional_and_dust_partial_payments_are_rejected(): void
     {
         [$u,$c,$p] = $this->fixture();

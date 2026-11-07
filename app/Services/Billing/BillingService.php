@@ -158,6 +158,9 @@ class BillingService
             $user = User::whereKey($invoice->user_id)->lockForUpdate()->firstOrFail();
             abort_unless($user->is_active, 404);
             $i = BillingInvoice::whereKey($invoice->id)->lockForUpdate()->firstOrFail();
+            if ($i->order_id) {
+                $i->orders()->syncWithoutDetaching([$i->order_id]);
+            }
             if ($i->status === 'void') {
                 throw ValidationException::withMessages(['payment' => 'This invoice has been voided.']);
             }

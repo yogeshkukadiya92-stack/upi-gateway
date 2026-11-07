@@ -42,9 +42,20 @@ class BillingInvoice extends Model
         return $this->belongsToMany(Order::class, 'billing_invoice_orders', 'invoice_id', 'order_id');
     }
 
+    public function paymentOrders()
+    {
+        $orders = $this->orders;
+        // Include orders written by the previous version during a rolling deployment.
+        if ($this->order && ! $orders->contains('id', $this->order_id)) {
+            return $orders->concat([$this->order]);
+        }
+
+        return $orders;
+    }
+
     public function paidPaise(): int
     {
-        return (int) $this->orders->where('status', Order::PAID)->sum(fn ($o) => BillingService::paise((string) $o->amount));
+        return (int) $this->paymentOrders()->where('status', Order::PAID)->sum(fn ($o) => BillingService::paise((string) $o->amount));
     }
 
     public function remainingPaise(): int
@@ -55,7 +66,7 @@ class BillingInvoice extends Model
     // Correlated aggregate works for both MySQL production and SQLite tests.
     public static function paidSql(): string
     {
-        return "(select coalesce(sum(round(o.amount * 100)),0) from billing_invoice_orders bio join orders o on o.id = bio.order_id where bio.invoice_id = billing_invoices.id and o.status = 'paid')";
+        return "(select coalesce(sum(round(o.amount * 100)),0) from orders o where o.status = 'paid' and (o.id = billing_invoices.order_id or exists (select 1 from billing_invoice_orders bio where bio.invoice_id = billing_invoices.id and bio.order_id = o.id)))";
     }
 
     public function scopePaid(Builder $q): void
@@ -81,7 +92,7 @@ class BillingInvoice extends Model
         if ($this->status === 'void') {
             return 'void';
         }
-        if ($this->orders->contains('status', Order::REVIEW)) {
+        if ($this->paymentOrders()->contains('status', Order::REVIEW)) {
             return 'review';
         }
 

@@ -295,7 +295,7 @@ class BillingController extends Controller
             if ($i->paidPaise() === 0) {
                 throw ValidationException::withMessages(['refund' => 'Only verified payments can have a refund record.']);
             }
-            if ($d['refunded_on'] < $i->orders->where('status', Order::PAID)->max('paid_at')->toDateString()) {
+            if ($d['refunded_on'] < $i->paymentOrders()->where('status', Order::PAID)->max('paid_at')->toDateString()) {
                 throw ValidationException::withMessages(['refunded_on' => 'Refund date cannot be earlier than the payment.']);
             }
             $amount = BillingService::paise((string) $d['amount']);
@@ -348,7 +348,7 @@ class BillingController extends Controller
                 $row = [$i->number, $i->customer_name, $i->customer->email, $i->description,
                     $i->issued_on->toDateString(), $i->due_on->toDateString(), number_format($i->amount_paise / 100, 2, '.', ''),
                     number_format($i->discount_paise / 100, 2, '.', ''), number_format($i->totalPaise() / 100, 2, '.', ''),
-                    $i->state(), $i->order?->paid_at?->toIso8601String(), $i->orders->where('status', Order::PAID)->pluck('utr')->filter()->join('; '), number_format(($i->refunds_sum_amount_paise ?? 0) / 100, 2, '.', ''), number_format($i->paidPaise() / 100, 2, '.', ''), number_format($i->remainingPaise() / 100, 2, '.', '')];
+                    $i->state(), $i->order?->paid_at?->toIso8601String(), $i->paymentOrders()->where('status', Order::PAID)->pluck('utr')->filter()->join('; '), number_format(($i->refunds_sum_amount_paise ?? 0) / 100, 2, '.', ''), number_format($i->paidPaise() / 100, 2, '.', ''), number_format($i->remainingPaise() / 100, 2, '.', '')];
                 $row = array_map(fn ($v) => preg_match('/^[\s]*[=+@-]|^[\t\r\n]/', (string) $v) ? "'".$v : (string) $v, $row);
                 fputcsv($f, $row, ',', '"', '');
             }
